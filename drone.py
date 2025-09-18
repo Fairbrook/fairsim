@@ -1,6 +1,7 @@
 import rerun as rr
 import numpy as np
 import math
+import time
 
 
 class Quaternion:
@@ -21,6 +22,15 @@ class Quaternion:
             self.w()*r.y() - self.x()*r.z() + self.y()*r.w() + self.z()*r.x(),
             self.w()*r.z() + self.x()*r.y() - self.y()*r.x() + self.z()*r.w(),
         ]
+        return Quaternion(result)
+
+    def __add__(self, r):
+        result = np.array([
+            self.w() + r.w(),
+            self.x() + r.x(),
+            self.y() + r.y(),
+            self.z() + r.z(),
+        ])
         return Quaternion(result)
 
     def w(self):
@@ -99,18 +109,36 @@ class Drone:
 
     def get_f_desired(self, pd):
         pdv = np.array(pd)
-        return -self.kpt*(self.pos-pdv) - self.kdt*(self.pdot) - self.m*self.g
+        return -np.dot(self.kpt, (self.pos-pdv)) \
+            - np.dot(self.kdt, (self.pdot)) \
+            - self.m*self.g
 
     def get_torque_input(self, fu, yaw):
         unitz = np.array([0, 0, 1])
-        fu_unit = np.array(fu)/np.linalg(np.array(fu))
+        fu_unit = fu/np.linalg.norm(fu)
         qz = Quaternion(np.array([math.cos(yaw/2), 0, 0, math.sin(yaw/2)]))
         dot = np.dot(fu_unit, unitz)
         cross = np.linalg.cross(fu_unit, unitz)
-        return -2*self.kpr*(qz*(math.sqrt((1+dot)/2)-(cross/np.linalg(cross))*math.sqrt((1-dot)/2)) * self.q).ln() - self.kdr*self.omega + np.cross(self.omega, self.J*self.omega)
+        print(cross)
+        imaginary = (cross/np.linalg.norm(cross))*math.sqrt((1-dot)/2)
+        real = math.sqrt((1+dot)/2)
+        q = Quaternion(
+            np.array([real, -imaginary[0], -imaginary[1], -imaginary[2]]))
+        q = qz.conjugate() * q * self.q
+        return -2*np.dot(self.kpr, q.ln())\
+            - np.dot(self.kdr, self.omega)\
+            + np.cross(self.omega, np.dot(self.J, self.omega))
 
-    def update_state(self, torque):
-        pass
+    def update_state(self, position, yaw, dt):
+        f = self.get_f_desired(position)
+        tau = self.get_torque_input(f, yaw)
+        self.pos += self.pdot * dt
+        self.pdot += (self.q *
+                      Quaternion([0, *f/self.m]) * self.q.conjugate() +
+                      Quaternion([0, *self.g])).data[1:] * dt
+        self.q = self.q + self.q*Quaternion([0, *self.omega])*0.5*dt
+        self.omega += np.dot(np.linalg.inv(self.J), tau -
+                             np.cross(self.omega, np.dot(self.J, self.omega))) * dt
 
 
 rr.init("drone", spawn=True)
@@ -118,9 +146,14 @@ rr.init("drone", spawn=True)
 rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Z_UP)
 rr.log("world/drone", rr.Asset3D(path="./X500.glb"))
 
+T = 10
+dt = 0.01
+t = 0
 drone = Drone()
-qa = drone.get_q_desired([1, 1, 1])
-print(qa)
 
-rr.log("world/drone",
-       rr.Transform3D(translation=[1, 1, 1], quaternion=[qa.x(), qa.y(), qa.z(), qa.w()]))
+while t < T:
+    drone.update_state([0, 0, 3], 5, dt)
+    rr.log("world/drone",
+           rr.Transform3D(translation=drone.pos, quaternion=[*drone.q[1:], drone.q[0]]))
+    time.sleep(dt)
+    t += dt

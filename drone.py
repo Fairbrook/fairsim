@@ -16,12 +16,14 @@ class Quaternion:
         return self.data[key]
 
     def __mul__(self, r):
-        result = [
+        if isinstance(r, float) or isinstance(r, int):
+            return Quaternion(self.data * r)
+        result = np.array([
             self.w()*r.w() - self.x()*r.x() - self.y()*r.y() - self.z()*r.z(),
             self.w()*r.x() + self.x()*r.w() + self.y()*r.z() - self.z()*r.y(),
             self.w()*r.y() - self.x()*r.z() + self.y()*r.w() + self.z()*r.x(),
             self.w()*r.z() + self.x()*r.y() - self.y()*r.x() + self.z()*r.w(),
-        ]
+        ])
         return Quaternion(result)
 
     def __add__(self, r):
@@ -64,9 +66,9 @@ class Drone:
     m = 1.5
     q = Quaternion()
     nz = np.array([0, 0, 1])
-    pos = np.array([0, 0, 0])
-    g = np.array([0, 0, 9.81])
-    pdot = np.array([0, 0, 0])
+    pos = np.array([0.0, 0.0, 0.0])
+    g = np.array([0, 0, -9.81])
+    pdot = np.array([0.0, 0.0, 0.0])
     kpt = np.array([
         [1, 0, 0],
         [0, 1, 0],
@@ -78,7 +80,7 @@ class Drone:
         [0, 0, 1]
     ])
 
-    omega = np.array([0, 0, 0])
+    omega = np.array([0.0, 0.0, 0.0])
     J = np.array([
         [1, 0, 0],
         [0, 1, 0],
@@ -119,11 +121,17 @@ class Drone:
         qz = Quaternion(np.array([math.cos(yaw/2), 0, 0, math.sin(yaw/2)]))
         dot = np.dot(fu_unit, unitz)
         cross = np.linalg.cross(fu_unit, unitz)
-        print(cross)
-        imaginary = (cross/np.linalg.norm(cross))*math.sqrt((1-dot)/2)
+        if (np.linalg.norm(cross) == 0):
+            imaginary = [0, 0, 0]
+        else:
+            imaginary = (cross/np.linalg.norm(cross))*math.sqrt((1-dot)/2)
         real = math.sqrt((1+dot)/2)
-        q = Quaternion(
-            np.array([real, -imaginary[0], -imaginary[1], -imaginary[2]]))
+        if 2*np.acos(real) > math.pi:
+            q = Quaternion(
+                np.array([-real, imaginary[0], imaginary[1], imaginary[2]]))
+        else:
+            q = Quaternion(
+                np.array([real, -imaginary[0], -imaginary[1], -imaginary[2]]))
         q = qz.conjugate() * q * self.q
         return -2*np.dot(self.kpr, q.ln())\
             - np.dot(self.kdr, self.omega)\
@@ -152,8 +160,8 @@ t = 0
 drone = Drone()
 
 while t < T:
-    drone.update_state([0, 0, 3], 5, dt)
+    drone.update_state([3, 3, 3], 5, dt)
     rr.log("world/drone",
            rr.Transform3D(translation=drone.pos, quaternion=[*drone.q[1:], drone.q[0]]))
-    time.sleep(dt)
+    time.sleep(0.1)
     t += dt
